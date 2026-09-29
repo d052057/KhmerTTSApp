@@ -1,0 +1,173 @@
+﻿<Window x:Class="KhmerTTSApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:KhmerTTSApp"
+        mc:Ignorable="d"
+         Title="Khmer Text-to-Speech" Height="620" Width="680"  
+        Background="#F9F9F9" WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <!-- Locked High-Contrast Style for the Analyze MP4 Button -->
+        <Style x:Key="AnalyzeButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontFamily" Value="Leelawadee UI"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Background" Value="#7B1FA2"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Name="Border" Background="{TemplateBinding Background}" CornerRadius="4" BorderThickness="0">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Border" Property="Background" Value="#4A148C"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Locked High-Contrast Style for the Generate MP3 Button -->
+        <Style x:Key="GenerateButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontFamily" Value="Leelawadee UI"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Background" Value="#388E3C"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Name="Border" Background="{TemplateBinding Background}" CornerRadius="4" BorderThickness="0">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Border" Property="Background" Value="#1B5E20"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Locked High-Contrast Style for the Merge Video Button -->
+        <Style x:Key="MergeButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontFamily" Value="Leelawadee UI"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Background" Value="#FF9800"/>
+            <!-- Orange Default -->
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Name="Border" Background="{TemplateBinding Background}" CornerRadius="4" BorderThickness="0">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Border" Property="Background" Value="#E65100"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="បញ្ចូលអត្ថបទខ្មែរ (Enter Khmer Text or Open Subtitle File):" 
+                   FontFamily="Leelawadee UI, Khmer OS Battambang" 
+                   FontSize="15" FontWeight="Bold" Foreground="#111111" Margin="0,0,0,10"/>
+
+        <!-- Text Input Area -->
+        <TextBox Grid.Row="1" Name="TxtInput" AcceptsReturn="True" TextWrapping="Wrap"
+                 FontFamily="Leelawadee UI, Khmer OS Battambang" FontSize="14"
+                 Padding="10" VerticalScrollBarVisibility="Auto"
+                 Background="#FFFFFF" Foreground="#1A1A1A"
+                 BorderBrush="#A0A0A0" BorderThickness="1.5"/>
+
+        <!-- Fine-Tuning Dashboard -->
+        <Border Grid.Row="2" Background="#EFEFEF" BorderBrush="#D0D0D0" BorderThickness="1" CornerRadius="6" Padding="15" Margin="0,15,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="160"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="60"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Voice Type Switcher Selection Box -->
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="ជ្រើសរើសសំឡេង (Voice):" VerticalAlignment="Center" FontWeight="Bold" Foreground="#222222" FontFamily="Leelawadee UI"/>
+                <ComboBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Name="CboVoice" Height="28" SelectedIndex="0" Margin="0,0,0,10" Background="#FFFFFF" Foreground="#000000">
+                    <ComboBoxItem Content="ប្រុស - ពិសិដ្ឋ (Male - Piseth)"/>
+                    <ComboBoxItem Content="ស្រី - ស្រីមុំ (Female - Sreymom)"/>
+                </ComboBox>
+
+                <!-- Speed/Pacing Rate Slider -->
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="ល្បឿននិយាយ (Speed/Rate):" VerticalAlignment="Center" FontWeight="Bold" Foreground="#222222" FontFamily="Leelawadee UI"/>
+                <Slider Grid.Row="1" Grid.Column="1" Name="SldRate" Minimum="-50" Maximum="50" Value="0" TickFrequency="5" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+                <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding ElementName=SldRate, Path=Value, StringFormat={}{0}%}" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#111111" FontWeight="Bold"/>
+
+                <!-- Vocal Tone Pitch Modification Slider -->
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="កម្រិតសំឡេង (Pitch):" VerticalAlignment="Center" FontWeight="Bold" Foreground="#222222" FontFamily="Leelawadee UI" Margin="0,10,0,0"/>
+                <Slider Grid.Row="2" Grid.Column="1" Name="SldPitch" Minimum="-25" Maximum="25" Value="0" TickFrequency="5" IsSnapToTickEnabled="True" VerticalAlignment="Center" Margin="0,10,0,0"/>
+                <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding ElementName=SldPitch, Path=Value, StringFormat={}{0}%}" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="#111111" FontWeight="Bold" Margin="0,10,0,0"/>
+            </Grid>
+        </Border>
+
+        <!-- Save File Name Row -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,15,0,0" HorizontalAlignment="Center">
+            <TextBlock Text="ឈ្មោះឯកសារ (Save File Name): " VerticalAlignment="Center" 
+                       FontFamily="Leelawadee UI" FontSize="13" Foreground="#333333" FontWeight="SemiBold"/>
+            <TextBox Name="TxtFileName" Text="KhmerAudio" Width="240" Height="28" 
+                     VerticalContentAlignment="Center" Padding="5,0" Margin="5,0,0,0"
+                     Background="#FFFFFF" Foreground="#000000" BorderBrush="#A0A0A0" BorderThickness="1"/>
+            <TextBlock Text=".mp3" VerticalAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="#333333" Margin="4,0,0,0"/>
+        </StackPanel>
+
+        <!-- Dynamic 5-Column Control Action Layout Row -->
+        <!-- Control Action Matrix Frame Grid Layout (Set to Columns=5) -->
+        <UniformGrid Grid.Row="4" Columns="5" Margin="0,15,0,0">
+            <Button Name="BtnOpenFile" Content="Open SRT/VTT" Click="BtnOpenFile_Click"
+                    Background="#1976D2" Foreground="White" Margin="0,0,4,0" Height="40"
+                    FontFamily="Leelawadee UI" FontSize="10" FontWeight="Bold"/>
+
+            <Button Name="BtnAnalyzeVideo" Content="Analyze MP4" Click="BtnAnalyzeVideo_Click"
+                    Style="{StaticResource AnalyzeButtonStyle}" Margin="4,0,4,0"/>
+
+            <Button Name="BtnGenerate" Content="Generate MP3" Click="BtnGenerate_Click"
+                    Style="{StaticResource GenerateButtonStyle}" Margin="4,0,4,0"/>
+
+            <Button Name="BtnMergeVideo" Content="Merge MP4 &amp; MP3" Click="BtnMergeVideo_Click"
+                    Style="{StaticResource MergeButtonStyle}" Margin="4,0,4,0"/>
+
+            <Button Name="BtnClear" Content="Clear / លុប" Click="BtnClear_Click"
+                    Background="#D32F2F" Foreground="White" Margin="4,0,0,0" Height="40"
+                    FontFamily="Leelawadee UI" FontSize="10" FontWeight="Bold"/>
+        </UniformGrid>
+    </Grid>
+</Window>
