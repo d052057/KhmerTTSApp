@@ -22,6 +22,13 @@ namespace KhmerTTSApp
     {
         private string _loadedFileExtension = ".srt";
         private const string IgnoreFileName = "ignore_words.txt";
+        public class SubtitleBlock
+        {
+            public TimeSpan Start { get; set; }
+            public TimeSpan End { get; set; }
+            public string Text { get; set; }
+            public double TargetDuration => (End - Start).TotalSeconds;
+        }
 
         public MainWindow()
         {
@@ -189,6 +196,8 @@ namespace KhmerTTSApp
                         {
                             CboVoice.SelectedIndex = 0;
                             double pitchOffsetPercent = ((averagePitchHz - 120) / 120) * 100;
+
+                            // 1. Assign values calculated from video analysis
                             SldRate.Value = 0;
                             SldPitch.Value = Math.Clamp((int)pitchOffsetPercent, -25, 25);
                         }
@@ -196,9 +205,16 @@ namespace KhmerTTSApp
                         {
                             CboVoice.SelectedIndex = 1;
                             double pitchOffsetPercent = ((averagePitchHz - 210) / 210) * 100;
+
+                            // 1. Assign values calculated from video analysis
                             SldRate.Value = 0;
                             SldPitch.Value = Math.Clamp((int)pitchOffsetPercent, -25, 25);
                         }
+
+                        // 2. Lock sliders so the user cannot accidentally modify the matched sync baseline
+                        SldRate.IsEnabled = false;
+                        SldPitch.IsEnabled = false;
+
                     }
                     else
                     {
@@ -260,21 +276,42 @@ namespace KhmerTTSApp
 
             try
             {
-                // Added missing <string> type definition
                 List<string> wordsToIgnore = LoadIgnoreWords();
                 string[] lines = rawText.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-                StringBuilder cleanAudioTextBuilder = new StringBuilder();
+
+                List<SubtitleBlock> subBlocks = new List<SubtitleBlock>();
+                TimeSpan currentStart = TimeSpan.Zero;
+                TimeSpan currentEnd = TimeSpan.Zero;
+                bool readingText = false;
+                StringBuilder textAccumulator = new StringBuilder();
                 string lastAddedText = string.Empty;
 
                 foreach (var line in lines)
                 {
                     string trimmedLine = line.Trim();
-
                     if (trimmedLine.StartsWith("WEBVTT", StringComparison.OrdinalIgnoreCase)) continue;
                     if (Regex.IsMatch(trimmedLine, @"^\d+$")) continue;
-                    if (trimmedLine.Contains("-->")) continue;
 
-                    if (!string.IsNullOrWhiteSpace(trimmedLine))
+                    if (trimmedLine.Contains("-->"))
+                    {
+                        // Flush any previously accumulated text before starting a new block
+                        if (readingText && textAccumulator.Length > 0)
+                        {
+                            subBlocks.Add(new SubtitleBlock { Start = currentStart, End = currentEnd, Text = textAccumulator.ToString().Trim() });
+                            textAccumulator.Clear();
+                        }
+
+                        var parts = Regex.Split(trimmedLine, @"\s*-->\s*");
+                        if (parts.Length >= 2)
+                        {
+                            TimeSpan.TryParse(parts[0].Replace(',', '.'), out currentStart);
+                            TimeSpan.TryParse(parts[1].Replace(',', '.'), out currentEnd);
+                            readingText = true;
+                        }
+                        continue;
+                    }
+
+                    if (readingText && !string.IsNullOrWhiteSpace(trimmedLine))
                     {
                         foreach (string customWord in wordsToIgnore)
                         {
@@ -285,30 +322,22 @@ namespace KhmerTTSApp
 
                         if (trimmedLine.Length > 0)
                         {
-                            if (trimmedLine.Equals(lastAddedText, StringComparison.OrdinalIgnoreCase))
-                                continue;
-
-                            if (!string.IsNullOrEmpty(lastAddedText) && trimmedLine.StartsWith(lastAddedText, StringComparison.OrdinalIgnoreCase))
-                            {
-                                int lastLen = lastAddedText.Length + 1;
-                                if (cleanAudioTextBuilder.Length >= lastLen)
-                                {
-                                    cleanAudioTextBuilder.Length -= lastLen;
-                                }
-                            }
-
-                            cleanAudioTextBuilder.Append(trimmedLine).Append(" ");
+                            if (trimmedLine.Equals(lastAddedText, StringComparison.OrdinalIgnoreCase)) continue;
+                            textAccumulator.Append(trimmedLine).Append(" ");
                             lastAddedText = trimmedLine;
                         }
                     }
                 }
 
-                string filteredVoiceText = cleanAudioTextBuilder.ToString().Trim();
-                filteredVoiceText = Regex.Replace(filteredVoiceText, @"\s+", " ");
-
-                if (string.IsNullOrWhiteSpace(filteredVoiceText))
+                // Flush the very last subtitle block
+                if (readingText && textAccumulator.Length > 0)
                 {
-                    throw new Exception("All text inside this file matched your 'ignore_words.txt' list or timestamp layers.");
+                    subBlocks.Add(new SubtitleBlock { Start = currentStart, End = currentEnd, Text = textAccumulator.ToString().Trim() });
+                }
+
+                if (subBlocks.Count == 0)
+                {
+                    throw new Exception("No valid timestamp blocks or text content found inside this file.");
                 }
 
                 string selectedVoiceName = CboVoice.SelectedIndex == 0 ? "km-KH-PisethNeural" : "km-KH-SreymomNeural";
@@ -317,13 +346,121 @@ namespace KhmerTTSApp
                 string rateValue = SldRate.Value >= 0 ? $"+{(int)SldRate.Value}%" : $"{(int)SldRate.Value}%";
                 string pitchValue = SldPitch.Value >= 0 ? $"+{(int)SldPitch.Value}%" : $"{(int)SldPitch.Value}%";
 
-                await voice.SaveAudioToFile(filteredVoiceText, targetAudioPath);
-                await File.WriteAllTextAsync(targetSubtitlePath, rawText, Encoding.UTF8);
+                // Create environment to dump processed fragment files
+                string tempDir = Path.Combine(Path.GetTempPath(), "KhmerTTS_" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempDir);
 
+                List<string> processedPaths = new List<string>();
+
+                // 1. Render individual files and dynamically stretch tempo
+                for (int i = 0; i < subBlocks.Count; i++)
+                {
+                    string rawSeg = Path.Combine(tempDir, $"raw_{i}.mp3");
+                    string fixedSeg = Path.Combine(tempDir, $"fixed_{i}.mp3");
+
+                    //  This satisfies the exact two-string argument requirement
+                    await voice.SaveAudioToFile(subBlocks[i].Text, rawSeg);
+
+
+                    var info = await FFmpeg.GetMediaInfo(rawSeg);
+                    double duration = info.Duration.TotalSeconds;
+
+                    if (duration > subBlocks[i].TargetDuration && subBlocks[i].TargetDuration > 0)
+                    {
+                        // Calculate the baseline automatic speed stretch factor required for timeline sync
+                        double speedRatio = 1.0;
+                        if (duration > subBlocks[i].TargetDuration && subBlocks[i].TargetDuration > 0)
+                        {
+                            speedRatio = duration / subBlocks[i].TargetDuration;
+                        }
+
+                        // 1. Incorporate your read-only slider configurations set by the video analyzer
+                        double sliderSpeedFactor = 1.0 + (SldRate.Value / 100.0);
+                        double combinedSpeedRatio = speedRatio * sliderSpeedFactor;
+
+                        // Clamp speed to safe FFmpeg execution limits (0.5 to 2.0)
+                        if (combinedSpeedRatio > 2.0) combinedSpeedRatio = 2.0;
+                        if (combinedSpeedRatio < 0.5) combinedSpeedRatio = 0.5;
+
+                        // 2. Process pitch mathematically via audio frequency shifts
+                        double pitchFactor = 1.0 + (SldPitch.Value / 100.0);
+                        int targetSampleRate = 24000; // EdgeTTS base sample rate
+                        int adjustedSampleRate = (int)(targetSampleRate * pitchFactor);
+
+                        // 3. Chain filters: Apply pitch adjustments AND speed modifications globally
+                        string args = $"-y -i \"{rawSeg}\" -filter:a \"asetrate={adjustedSampleRate},aresample={targetSampleRate},atempo={combinedSpeedRatio:F2}\" \"{fixedSeg}\"";
+
+                        var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "ffmpeg.exe",
+                            Arguments = args,
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        });
+                        process?.WaitForExit();
+
+                    }
+                    else
+                    {
+                        File.Copy(rawSeg, fixedSeg, true);
+                    }
+
+                    processedPaths.Add(fixedSeg);
+                }
+
+                // 2. Build text manifest to assemble clips on the absolute timeline
+                string manifestPath = Path.Combine(tempDir, "concat_list.txt");
+                StringBuilder manifestBuilder = new StringBuilder();
+                TimeSpan timelineCursor = TimeSpan.Zero;
+
+                for (int i = 0; i < processedPaths.Count; i++)
+                {
+                    // Add silent audio gaps between blocks if a delay exists
+                    if (subBlocks[i].Start > timelineCursor)
+                    {
+                        double gapSeconds = (subBlocks[i].Start - timelineCursor).TotalSeconds;
+                        string silenceFile = Path.Combine(tempDir, $"silence_{i}.mp3");
+                        string silenceArgs = $"-y -f lavfi -i anullsrc=r=44100:c=stereo -t {gapSeconds:F3} -c:a mp3 \"{silenceFile}\"";
+
+                        var pSilence = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "ffmpeg.exe",
+                            Arguments = silenceArgs,
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        });
+                        pSilence?.WaitForExit();
+
+                        manifestBuilder.AppendLine($"file '{silenceFile.Replace("\\", "/")}'");
+                        timelineCursor += TimeSpan.FromSeconds(gapSeconds);
+                    }
+
+                    manifestBuilder.AppendLine($"file '{processedPaths[i].Replace("\\", "/")}'");
+                    var info = await FFmpeg.GetMediaInfo(processedPaths[i]);
+                    timelineCursor += info.Duration;
+                }
+
+                await File.WriteAllTextAsync(manifestPath, manifestBuilder.ToString(), Encoding.UTF8);
+
+                // 3. Concat everything into the final target audio file path
+                string concatArgs = $"-y -f concat -safe 0 -i \"{manifestPath}\" -c copy \"{targetAudioPath}\"";
+                var pConcat = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "ffmpeg.exe",
+                    Arguments = concatArgs,
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                });
+                pConcat?.WaitForExit();
+
+                // 4. Safely clean up workspace files
+                try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
+
+
+                await File.WriteAllTextAsync(targetSubtitlePath, rawText, Encoding.UTF8);
                 Mouse.OverrideCursor = null;
                 MessageBox.Show("Files generated successfully!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
 
-                // Fixed literal string quotes collision format
                 string argument = $"/select,\"{targetAudioPath}\"";
                 System.Diagnostics.Process.Start("explorer.exe", argument);
             }
@@ -339,6 +476,7 @@ namespace KhmerTTSApp
                 BtnOpenFile.IsEnabled = true;
                 BtnGenerate.Content = "Generate MP3";
             }
+
         } // Closes BtnGenerate_Click
           // NEW FEATURE: Natively multiplexes the new Khmer MP3 track directly back into an MP4 video layout
         private async void BtnMergeVideo_Click(object sender, RoutedEventArgs e)
@@ -367,7 +505,7 @@ namespace KhmerTTSApp
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = ffmpegPath,
-                    // -map 0:v takes original video, -map 1:a takes new audio, -c:v copy copies video stream instantly without slow re-encoding
+                    // REMOVED: Accidental escape backslash before the second input file path
                     Arguments = $"-y -i \"{videoDialog.FileName}\" -i \"{audioDialog.FileName}\" -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -shortest \"{outputDialog.FileName}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -404,9 +542,15 @@ namespace KhmerTTSApp
             TxtInput.Clear();
             TxtFileName.Text = "KhmerAudio";
             _loadedFileExtension = ".srt";
+
+            // Unlock and reset
             SldRate.Value = 0;
             SldPitch.Value = 0;
+            SldRate.IsEnabled = true;
+            SldPitch.IsEnabled = true;
+
             CboVoice.SelectedIndex = 0;
         }
+
     }
 }
