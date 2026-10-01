@@ -22,11 +22,14 @@ namespace KhmerTTSApp
     {
         private string _loadedFileExtension = ".srt";
         private const string IgnoreFileName = "ignore_words.txt";
+
+        // GLOBALIZED: Single source of truth for your FFmpeg path
+        private string _resolvedFfmpegPath = string.Empty;
         public class SubtitleBlock
         {
             public TimeSpan Start { get; set; }
             public TimeSpan End { get; set; }
-            public string Text { get; set; }
+            public string Text { get; set; } = string.Empty;
             public double TargetDuration => (End - Start).TotalSeconds;
         }
 
@@ -35,8 +38,15 @@ namespace KhmerTTSApp
             InitializeComponent();
             FFmpeg.SetExecutablesPath(AppDomain.CurrentDomain.BaseDirectory);
             EnsureIgnoreFileExists();
+            InitializeGlobalFfmpegPath();
         }
 
+        private void InitializeGlobalFfmpegPath()
+        {
+            string executableName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+            string localAppPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, executableName);
+            _resolvedFfmpegPath = File.Exists(localAppPath) ? localAppPath : executableName;
+        }
         private void EnsureIgnoreFileExists()
         {
             try
@@ -79,7 +89,6 @@ namespace KhmerTTSApp
             }
             return ignoreList;
         }
-
         private void BtnOpenFile_Click(object sender, RoutedEventArgs e)
         {
             OpenFileDialog openFileDialog = new OpenFileDialog();
@@ -131,35 +140,14 @@ namespace KhmerTTSApp
             string tempWavPath = Path.Combine(Path.GetTempPath(), "extracted_temp.wav");
             try
             {
-                string ffmpegExecutableName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = ffmpegExecutableName,
-                    Arguments = $"-y -i \"{mp4Path}\" -vn -acodec pcm_s16le -ac 1 -ar 16000 \"{tempWavPath}\"",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
+                string args = new StringBuilder().AppendFormat("-y -i \"{0}\" -vn -acodec pcm_s16le -ac 1 -ar 16000 \"{1}\"", mp4Path, tempWavPath).ToString();
+                var ffmpegTask = RunFFmpegAsync(args);
+                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(45));
 
-                if (!File.Exists(psi.FileName) && File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe")))
+                var completedTask = await Task.WhenAny(ffmpegTask, timeoutTask);
+                if (completedTask == timeoutTask)
                 {
-                    psi.FileName = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ffmpeg.exe");
-                }
-
-                using (var process = System.Diagnostics.Process.Start(psi))
-                {
-                    if (process != null)
-                    {
-                        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(45));
-                        var processTask = process.WaitForExitAsync();
-                        var completedTask = await Task.WhenAny(processTask, timeoutTask);
-                        if (completedTask == timeoutTask)
-                        {
-                            try { process.Kill(); } catch { }
-                            throw new TimeoutException("FFmpeg operation timed out. Ensure the MP4 video is not corrupted.");
-                        }
-                    }
+                    throw new TimeoutException("FFmpeg operation timed out. Ensure the MP4 video is not corrupted.");
                 }
 
                 if (!File.Exists(tempWavPath))
@@ -196,8 +184,6 @@ namespace KhmerTTSApp
                         {
                             CboVoice.SelectedIndex = 0;
                             double pitchOffsetPercent = ((averagePitchHz - 120) / 120) * 100;
-
-                            // 1. Assign values calculated from video analysis
                             SldRate.Value = 0;
                             SldPitch.Value = Math.Clamp((int)pitchOffsetPercent, -25, 25);
                         }
@@ -205,16 +191,12 @@ namespace KhmerTTSApp
                         {
                             CboVoice.SelectedIndex = 1;
                             double pitchOffsetPercent = ((averagePitchHz - 210) / 210) * 100;
-
-                            // 1. Assign values calculated from video analysis
                             SldRate.Value = 0;
                             SldPitch.Value = Math.Clamp((int)pitchOffsetPercent, -25, 25);
                         }
 
-                        // 2. Lock sliders so the user cannot accidentally modify the matched sync baseline
                         SldRate.IsEnabled = false;
                         SldPitch.IsEnabled = false;
-
                     }
                     else
                     {
@@ -236,7 +218,6 @@ namespace KhmerTTSApp
                 }
             }
         }
-
         private async void BtnGenerate_Click(object sender, RoutedEventArgs e)
         {
             string rawText = TxtInput.Text.Trim();
@@ -244,7 +225,11 @@ namespace KhmerTTSApp
 
             if (string.IsNullOrWhiteSpace(rawText))
             {
-                MessageBox.Show("Please open a file or enter some Khmer text first.", "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
+                string warningMessage = "Please open a file or enter some Khmer text first.";
+                if (MessageBox.Show(warningMessage, "Warning", MessageBoxButton.OK, MessageBoxImage.Warning) == MessageBoxResult.OK)
+                {
+                    Clipboard.SetText(warningMessage);
+                }
                 return;
             }
 
@@ -253,7 +238,7 @@ namespace KhmerTTSApp
                 MessageBox.Show("Please type a valid filename.", "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-            // Fixed character conversion engine logic to clear string replace bugs
+
             foreach (char c in Path.GetInvalidFileNameChars())
             {
                 outputName = outputName.Replace(c.ToString(), "");
@@ -273,6 +258,9 @@ namespace KhmerTTSApp
             BtnOpenFile.IsEnabled = false;
             BtnGenerate.Content = "Processing...";
             Mouse.OverrideCursor = Cursors.Wait;
+
+            string tempDir = Path.Combine(Path.GetTempPath(), "KhmerTTS_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
 
             try
             {
@@ -294,7 +282,6 @@ namespace KhmerTTSApp
 
                     if (trimmedLine.Contains("-->"))
                     {
-                        // Flush any previously accumulated text before starting a new block
                         if (readingText && textAccumulator.Length > 0)
                         {
                             subBlocks.Add(new SubtitleBlock { Start = currentStart, End = currentEnd, Text = textAccumulator.ToString().Trim() });
@@ -304,8 +291,16 @@ namespace KhmerTTSApp
                         var parts = Regex.Split(trimmedLine, @"\s*-->\s*");
                         if (parts.Length >= 2)
                         {
-                            TimeSpan.TryParse(parts[0].Replace(',', '.'), out currentStart);
-                            TimeSpan.TryParse(parts[1].Replace(',', '.'), out currentEnd);
+                            // Target the array index fields directly before calling Trim and Replace
+                            string startStr = parts[0].Trim().Replace(',', '.');
+                            string endStr = parts[1].Trim().Replace(',', '.');
+
+
+                            if (startStr.Count(c => c == ':') == 1) startStr = "00:" + startStr;
+                            if (endStr.Count(c => c == ':') == 1) endStr = "00:" + endStr;
+
+                            TimeSpan.TryParse(startStr, System.Globalization.CultureInfo.InvariantCulture, out currentStart);
+                            TimeSpan.TryParse(endStr, System.Globalization.CultureInfo.InvariantCulture, out currentEnd);
                             readingText = true;
                         }
                         continue;
@@ -329,7 +324,6 @@ namespace KhmerTTSApp
                     }
                 }
 
-                // Flush the very last subtitle block
                 if (readingText && textAccumulator.Length > 0)
                 {
                     subBlocks.Add(new SubtitleBlock { Start = currentStart, End = currentEnd, Text = textAccumulator.ToString().Trim() });
@@ -339,130 +333,97 @@ namespace KhmerTTSApp
                 {
                     throw new Exception("No valid timestamp blocks or text content found inside this file.");
                 }
-
                 string selectedVoiceName = CboVoice.SelectedIndex == 0 ? "km-KH-PisethNeural" : "km-KH-SreymomNeural";
                 var voice = await EdgeTts.GetVoice(selectedVoiceName);
 
-                string rateValue = SldRate.Value >= 0 ? $"+{(int)SldRate.Value}%" : $"{(int)SldRate.Value}%";
-                string pitchValue = SldPitch.Value >= 0 ? $"+{(int)SldPitch.Value}%" : $"{(int)SldPitch.Value}%";
-
-                // Create environment to dump processed fragment files
-                string tempDir = Path.Combine(Path.GetTempPath(), "KhmerTTS_" + Guid.NewGuid().ToString("N"));
-                Directory.CreateDirectory(tempDir);
-
                 List<string> processedPaths = new List<string>();
 
-                // 1. Render individual files and dynamically stretch tempo
                 for (int i = 0; i < subBlocks.Count; i++)
                 {
                     string rawSeg = Path.Combine(tempDir, $"raw_{i}.mp3");
                     string fixedSeg = Path.Combine(tempDir, $"fixed_{i}.mp3");
 
-                    //  This satisfies the exact two-string argument requirement
                     await voice.SaveAudioToFile(subBlocks[i].Text, rawSeg);
-
 
                     var info = await FFmpeg.GetMediaInfo(rawSeg);
                     double duration = info.Duration.TotalSeconds;
 
+                    double speedRatio = 1.0;
                     if (duration > subBlocks[i].TargetDuration && subBlocks[i].TargetDuration > 0)
                     {
-                        // Calculate the baseline automatic speed stretch factor required for timeline sync
-                        double speedRatio = 1.0;
-                        if (duration > subBlocks[i].TargetDuration && subBlocks[i].TargetDuration > 0)
-                        {
-                            speedRatio = duration / subBlocks[i].TargetDuration;
-                        }
-
-                        // 1. Incorporate your read-only slider configurations set by the video analyzer
-                        double sliderSpeedFactor = 1.0 + (SldRate.Value / 100.0);
-                        double combinedSpeedRatio = speedRatio * sliderSpeedFactor;
-
-                        // Clamp speed to safe FFmpeg execution limits (0.5 to 2.0)
-                        if (combinedSpeedRatio > 2.0) combinedSpeedRatio = 2.0;
-                        if (combinedSpeedRatio < 0.5) combinedSpeedRatio = 0.5;
-
-                        // 2. Process pitch mathematically via audio frequency shifts
-                        double pitchFactor = 1.0 + (SldPitch.Value / 100.0);
-                        int targetSampleRate = 24000; // EdgeTTS base sample rate
-                        int adjustedSampleRate = (int)(targetSampleRate * pitchFactor);
-
-                        // 3. Chain filters: Apply pitch adjustments AND speed modifications globally
-                        string args = $"-y -i \"{rawSeg}\" -filter:a \"asetrate={adjustedSampleRate},aresample={targetSampleRate},atempo={combinedSpeedRatio:F2}\" \"{fixedSeg}\"";
-
-                        var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = "ffmpeg.exe",
-                            Arguments = args,
-                            CreateNoWindow = true,
-                            UseShellExecute = false
-                        });
-                        process?.WaitForExit();
-
-                    }
-                    else
-                    {
-                        File.Copy(rawSeg, fixedSeg, true);
+                        speedRatio = duration / subBlocks[i].TargetDuration;
                     }
 
+                    double sliderSpeedFactor = 1.0 + (SldRate.Value / 100.0);
+                    double combinedSpeedRatio = speedRatio * sliderSpeedFactor;
+
+                    if (combinedSpeedRatio > 2.0) combinedSpeedRatio = 2.0;
+                    if (combinedSpeedRatio < 0.5) combinedSpeedRatio = 0.5;
+
+                    double pitchFactor = 1.0 + (SldPitch.Value / 100.0);
+                    int targetSampleRate = 24000;
+                    int adjustedSampleRate = (int)(targetSampleRate * pitchFactor);
+
+                    string args = new StringBuilder().AppendFormat("-y -i \"{0}\" -filter:a \"asetrate={1},aresample=44100,atempo={2:F2}\" \"{3}\"", rawSeg, adjustedSampleRate, combinedSpeedRatio, fixedSeg).ToString();
+
+                    await RunFFmpegAsync(args);
                     processedPaths.Add(fixedSeg);
                 }
 
-                // 2. Build text manifest to assemble clips on the absolute timeline
                 string manifestPath = Path.Combine(tempDir, "concat_list.txt");
                 StringBuilder manifestBuilder = new StringBuilder();
                 TimeSpan timelineCursor = TimeSpan.Zero;
 
                 for (int i = 0; i < processedPaths.Count; i++)
                 {
-                    // Add silent audio gaps between blocks if a delay exists
                     if (subBlocks[i].Start > timelineCursor)
                     {
                         double gapSeconds = (subBlocks[i].Start - timelineCursor).TotalSeconds;
-                        string silenceFile = Path.Combine(tempDir, $"silence_{i}.mp3");
-                        string silenceArgs = $"-y -f lavfi -i anullsrc=r=44100:c=stereo -t {gapSeconds:F3} -c:a mp3 \"{silenceFile}\"";
 
-                        var pSilence = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        if (gapSeconds > 0.05)
                         {
-                            FileName = "ffmpeg.exe",
-                            Arguments = silenceArgs,
-                            CreateNoWindow = true,
-                            UseShellExecute = false
-                        });
-                        pSilence?.WaitForExit();
+                            string silenceFile = Path.Combine(tempDir, $"silence_{i}.mp3");
+                            string silenceArgs = new StringBuilder().AppendFormat("-y -f lavfi -i anullsrc=r=44100:c=stereo -t {0} -c:a libmp3lame \"{1}\"", gapSeconds.ToString("F3", System.Globalization.CultureInfo.InvariantCulture), silenceFile).ToString();
 
-                        manifestBuilder.AppendLine($"file '{silenceFile.Replace("\\", "/")}'");
-                        timelineCursor += TimeSpan.FromSeconds(gapSeconds);
+                            await RunFFmpegAsync(silenceArgs);
+
+                            if (File.Exists(silenceFile))
+                            {
+                                string formattedSilencePath = silenceFile.Replace(Path.DirectorySeparatorChar, '/');
+                                manifestBuilder.AppendLine($"file '{formattedSilencePath}'");
+                                timelineCursor += TimeSpan.FromSeconds(gapSeconds);
+                            }
+                        }
+                        else
+                        {
+                            timelineCursor = subBlocks[i].Start;
+                        }
                     }
 
-                    manifestBuilder.AppendLine($"file '{processedPaths[i].Replace("\\", "/")}'");
+                    string formattedAudioPath = processedPaths[i].Replace(Path.DirectorySeparatorChar, '/');
+                    manifestBuilder.AppendLine($"file '{formattedAudioPath}'");
+
                     var info = await FFmpeg.GetMediaInfo(processedPaths[i]);
                     timelineCursor += info.Duration;
                 }
 
-                await File.WriteAllTextAsync(manifestPath, manifestBuilder.ToString(), Encoding.UTF8);
+                await File.WriteAllTextAsync(manifestPath, manifestBuilder.ToString(), new UTF8Encoding(false));
+                string concatArgs = new StringBuilder().AppendFormat("-y -safe 0 -f concat -i \"{0}\" -c copy \"{1}\"", manifestPath, targetAudioPath).ToString();
 
-                // 3. Concat everything into the final target audio file path
-                string concatArgs = $"-y -f concat -safe 0 -i \"{manifestPath}\" -c copy \"{targetAudioPath}\"";
-                var pConcat = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "ffmpeg.exe",
-                    Arguments = concatArgs,
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                });
-                pConcat?.WaitForExit();
-
-                // 4. Safely clean up workspace files
-                try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
-
+                await RunFFmpegAsync(concatArgs);
 
                 await File.WriteAllTextAsync(targetSubtitlePath, rawText, Encoding.UTF8);
                 Mouse.OverrideCursor = null;
                 MessageBox.Show("Files generated successfully!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
 
-                string argument = $"/select,\"{targetAudioPath}\"";
-                System.Diagnostics.Process.Start("explorer.exe", argument);
+                await ffmpegAudit(subBlocks, tempDir, processedPaths, manifestPath, targetAudioPath);
+
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = new StringBuilder().AppendFormat("/select,\"{0}\"", targetAudioPath).ToString(),
+                    UseShellExecute = true
+                });
             }
             catch (Exception ex)
             {
@@ -471,14 +432,13 @@ namespace KhmerTTSApp
             }
             finally
             {
+                try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
                 Mouse.OverrideCursor = null;
                 BtnGenerate.IsEnabled = true;
                 BtnOpenFile.IsEnabled = true;
                 BtnGenerate.Content = "Generate MP3";
             }
-
-        } // Closes BtnGenerate_Click
-          // NEW FEATURE: Natively multiplexes the new Khmer MP3 track directly back into an MP4 video layout
+        }
         private async void BtnMergeVideo_Click(object sender, RoutedEventArgs e)
         {
             MessageBox.Show("Please choose the original Video File (MP4) first, then select the new Khmer Audio track (MP3).", "Instructions", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -498,31 +458,19 @@ namespace KhmerTTSApp
 
             try
             {
-                string ffmpegExecutableName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-                string ffmpegPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ffmpegExecutableName);
-                if (!File.Exists(ffmpegPath)) ffmpegPath = ffmpegExecutableName;
+                string finalArguments = new StringBuilder().AppendFormat("-y -i \"{0}\" -i \"{1}\" -map 0:v:0 -map 0:a:0 -map 1:a:0 -c:v copy -c:a:0 copy -c:a:1 aac -metadata:s:a:0 title=\"Original\" -metadata:s:a:1 title=\"Khmer\" -shortest \"{2}\"", videoDialog.FileName, audioDialog.FileName, outputDialog.FileName).ToString();
 
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = ffmpegPath,
-                    // REMOVED: Accidental escape backslash before the second input file path
-                    Arguments = $"-y -i \"{videoDialog.FileName}\" -i \"{audioDialog.FileName}\" -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -shortest \"{outputDialog.FileName}\"",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                using (var process = System.Diagnostics.Process.Start(psi))
-                {
-                    if (process != null) await process.WaitForExitAsync();
-                }
+                await RunFFmpegAsync(finalArguments);
 
                 Mouse.OverrideCursor = null;
                 MessageBox.Show("Khmer voice audio merged into the MP4 video asset successfully!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
 
-                string argument = $"/select,\"{outputDialog.FileName}\"";
-                System.Diagnostics.Process.Start("explorer.exe", argument);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = new StringBuilder().AppendFormat("/select,\"{0}\"", outputDialog.FileName).ToString(),
+                    UseShellExecute = true
+                });
             }
             catch (Exception ex)
             {
@@ -543,7 +491,6 @@ namespace KhmerTTSApp
             TxtFileName.Text = "KhmerAudio";
             _loadedFileExtension = ".srt";
 
-            // Unlock and reset
             SldRate.Value = 0;
             SldPitch.Value = 0;
             SldRate.IsEnabled = true;
@@ -552,5 +499,118 @@ namespace KhmerTTSApp
             CboVoice.SelectedIndex = 0;
         }
 
+        private async Task RunFFmpegAsync(string arguments)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = _resolvedFfmpegPath,
+                Arguments = arguments,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using (var process = System.Diagnostics.Process.Start(psi))
+            {
+                if (process != null)
+                {
+                    await process.WaitForExitAsync();
+                }
+            }
+        }
+
+        private async Task ffmpegAudit(
+            List<SubtitleBlock> subBlocks,
+            string tempDir,
+            List<string> processedPaths,
+            string manifestPath,
+            string targetAudioPath)
+        {
+            string manualBatchPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Run_FFmpeg_Manually.bat");
+            StringBuilder batchBuilder = new StringBuilder();
+
+            batchBuilder.AppendLine("@echo off");
+            batchBuilder.AppendLine("echo ===================================================");
+            batchBuilder.AppendLine("echo      RUNNING MANUALLY ENCODED FFMPEG AUDIO TASKS      ");
+            batchBuilder.AppendLine("echo ===================================================");
+            batchBuilder.AppendLine("echo.");
+
+            batchBuilder.AppendLine("echo --- STAGE 1: RENDERING AND STRETCHING CLIPS ---");
+            for (int i = 0; i < subBlocks.Count; i++)
+            {
+                string rawSeg = Path.Combine(tempDir, $"raw_{i}.mp3");
+                string fixedSeg = Path.Combine(tempDir, $"fixed_{i}.mp3");
+
+                double speedRatio = 1.0;
+                try
+                {
+                    var info = await FFmpeg.GetMediaInfo(rawSeg);
+                    if (info.Duration.TotalSeconds > subBlocks[i].TargetDuration && subBlocks[i].TargetDuration > 0)
+                        speedRatio = info.Duration.TotalSeconds / subBlocks[i].TargetDuration;
+                }
+                catch { }
+
+                double combinedSpeedRatio = speedRatio * (1.0 + (SldRate.Value / 100.0));
+                if (combinedSpeedRatio > 2.0) combinedSpeedRatio = 2.0;
+                if (combinedSpeedRatio < 0.5) combinedSpeedRatio = 0.5;
+
+                int adjustedSampleRate = (int)(24000 * (1.0 + (SldPitch.Value / 100.0)));
+                string segArgs = $"-y -i '{rawSeg}' -filter:a 'asetrate={adjustedSampleRate},aresample=44100,atempo={combinedSpeedRatio:F2}' '{fixedSeg}'";
+                batchBuilder.AppendLine($" \"{_resolvedFfmpegPath}\" {segArgs} ");
+
+            }
+
+            batchBuilder.AppendLine("echo.");
+            batchBuilder.AppendLine("echo --- STAGE 2: INJECTING SILENCE FILES AND ASSEMBLING MASTER MP3 ---");
+
+            TimeSpan cursor = TimeSpan.Zero;
+            for (int i = 0; i < processedPaths.Count; i++)
+            {
+                if (subBlocks[i].Start > cursor)
+                {
+                    double gapSeconds = (subBlocks[i].Start - cursor).TotalSeconds;
+                    string silenceFile = Path.Combine(tempDir, $"silence_{i}.mp3");
+
+                    string silenceArgs = $"-y -f lavfi -i anullsrc=r=44100:c=stereo -t {gapSeconds.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)} -c:a libmp3lame '{silenceFile}'";
+                    batchBuilder.AppendFormat(" \"{0}\" {1} ", _resolvedFfmpegPath, silenceArgs).AppendLine();
+
+                    cursor += TimeSpan.FromSeconds(gapSeconds);
+                }
+                try
+                {
+                    var info = await FFmpeg.GetMediaInfo(processedPaths[i]);
+                    cursor += info.Duration;
+                }
+                catch { }
+            }
+
+            string finalConcatArgs = new StringBuilder().AppendFormat("-y -safe 0 -f concat -i \"{0}\" -c copy \"{1}\"", manifestPath, targetAudioPath).ToString();
+
+            batchBuilder.AppendFormat(" \"{0}\" {1} ", _resolvedFfmpegPath, finalConcatArgs).AppendLine();
+
+            batchBuilder.AppendLine("echo.");
+            batchBuilder.AppendLine("echo ===================================================");
+            batchBuilder.AppendLine("echo       TASKS RUN COMPLETE! INSPECT COMMAND LOGS ABOVE.     ");
+            batchBuilder.AppendLine("echo ===================================================");
+            batchBuilder.AppendLine("pause");
+
+            await File.WriteAllTextAsync(manualBatchPath, batchBuilder.ToString(), Encoding.UTF8);
+        }
+
+        private void ClipboardCopy(string text)
+        {
+            try
+            {
+                Clipboard.SetText(text);
+                MessageBox.Show("Text copied to clipboard!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to copy text to clipboard: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
     }
 }
+
+
