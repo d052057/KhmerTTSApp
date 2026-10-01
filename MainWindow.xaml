@@ -9,14 +9,14 @@
         Background="#F9F9F9" WindowStartupLocation="CenterScreen">
 
     <Window.Resources>
-        <!-- Locked High-Contrast Style for the Analyze MP4 Button -->
-        <Style x:Key="AnalyzeButtonStyle" TargetType="Button">
+        <!-- The Single Master Style for ALL Action Buttons -->
+        <Style x:Key="ActionButtonStyle" TargetType="Button">
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="FontFamily" Value="Leelawadee UI"/>
             <Setter Property="FontSize" Value="11"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Height" Value="40"/>
-            <Setter Property="Background" Value="#7B1FA2"/>
+            <!-- Universal template for clean rounded corners -->
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
@@ -24,67 +24,64 @@
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsEnabled" Value="False">
+                            <!-- 1. DYNAMIC DEFAULT STYLES (Based on Button Name) -->
+                            <DataTrigger Binding="{Binding Name, RelativeSource={RelativeSource Self}}" Value="BtnOpenFile">
+                                <Setter Property="Background" Value="#1976D2"/>
+                                <Setter Property="FontSize" Value="10"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Name, RelativeSource={RelativeSource Self}}" Value="BtnAnalyzeVideo">
+                                <Setter Property="Background" Value="#7B1FA2"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Name, RelativeSource={RelativeSource Self}}" Value="BtnGenerate">
+                                <Setter Property="Background" Value="#388E3C"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Name, RelativeSource={RelativeSource Self}}" Value="BtnMergeVideo">
+                                <Setter Property="Background" Value="#FF9800"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Name, RelativeSource={RelativeSource Self}}" Value="BtnClear">
+                                <Setter Property="Background" Value="#D32F2F"/>
+                                <Setter Property="FontSize" Value="10"/>
+                            </DataTrigger>
+
+                            <!-- 2. DYNAMIC DISABLED STYLES (Based on Button Name + IsEnabled=False) -->
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsEnabled, RelativeSource={RelativeSource Self}}" Value="False"/>
+                                    <Condition Binding="{Binding Name, RelativeSource={RelativeSource Self}}" Value="BtnOpenFile"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter TargetName="Border" Property="Background" Value="#0D47A1"/>
+                            </MultiDataTrigger>
+
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsEnabled, RelativeSource={RelativeSource Self}}" Value="False"/>
+                                    <Condition Binding="{Binding Name, RelativeSource={RelativeSource Self}}" Value="BtnAnalyzeVideo"/>
+                                </MultiDataTrigger.Conditions>
                                 <Setter TargetName="Border" Property="Background" Value="#4A148C"/>
-                                <Setter Property="Foreground" Value="#FFFFFF"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+                            </MultiDataTrigger>
 
-        <!-- Locked High-Contrast Style for the Generate MP3 Button -->
-        <Style x:Key="GenerateButtonStyle" TargetType="Button">
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontFamily" Value="Leelawadee UI"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Height" Value="40"/>
-            <Setter Property="Background" Value="#388E3C"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Name="Border" Background="{TemplateBinding Background}" CornerRadius="4" BorderThickness="0">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsEnabled" Value="False">
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsEnabled, RelativeSource={RelativeSource Self}}" Value="False"/>
+                                    <Condition Binding="{Binding Name, RelativeSource={RelativeSource Self}}" Value="BtnGenerate"/>
+                                </MultiDataTrigger.Conditions>
                                 <Setter TargetName="Border" Property="Background" Value="#1B5E20"/>
-                                <Setter Property="Foreground" Value="#FFFFFF"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+                            </MultiDataTrigger>
 
-        <!-- Locked High-Contrast Style for the Merge Video Button -->
-        <Style x:Key="MergeButtonStyle" TargetType="Button">
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontFamily" Value="Leelawadee UI"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Height" Value="40"/>
-            <Setter Property="Background" Value="#FF9800"/>
-            <!-- Orange Default -->
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Name="Border" Background="{TemplateBinding Background}" CornerRadius="4" BorderThickness="0">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsEnabled" Value="False">
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsEnabled, RelativeSource={RelativeSource Self}}" Value="False"/>
+                                    <Condition Binding="{Binding Name, RelativeSource={RelativeSource Self}}" Value="BtnMergeVideo"/>
+                                </MultiDataTrigger.Conditions>
                                 <Setter TargetName="Border" Property="Background" Value="#E65100"/>
-                                <Setter Property="Foreground" Value="#FFFFFF"/>
-                            </Trigger>
+                            </MultiDataTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
     </Window.Resources>
+
 
     <Grid Margin="20">
         <Grid.RowDefinitions>
@@ -153,17 +150,18 @@
         <!-- Control Action Matrix Frame Grid Layout (Set to Columns=5) -->
         <UniformGrid Grid.Row="4" Columns="5" Margin="0,15,0,0">
             <Button Name="BtnOpenFile" Content="Open SRT/VTT" Click="BtnOpenFile_Click"
+                    Style="{StaticResource ActionButtonStyle}" 
                     Background="#1976D2" Foreground="White" Margin="0,0,4,0" Height="40"
                     FontFamily="Leelawadee UI" FontSize="10" FontWeight="Bold"/>
 
             <Button Name="BtnAnalyzeVideo" Content="Analyze MP4" Click="BtnAnalyzeVideo_Click"
-                    Style="{StaticResource AnalyzeButtonStyle}" Margin="4,0,4,0"/>
+                    Style="{StaticResource ActionButtonStyle}"  Margin="4,0,4,0"/>
 
             <Button Name="BtnGenerate" Content="Generate MP3" Click="BtnGenerate_Click"
-                    Style="{StaticResource GenerateButtonStyle}" Margin="4,0,4,0"/>
+                    Style="{StaticResource ActionButtonStyle}"  Margin="4,0,4,0"/>
 
             <Button Name="BtnMergeVideo" Content="Merge MP4 &amp; MP3" Click="BtnMergeVideo_Click"
-                    Style="{StaticResource MergeButtonStyle}" Margin="4,0,4,0"/>
+                    Style="{StaticResource ActionButtonStyle}"  Margin="4,0,4,0"/>
 
             <Button Name="BtnClear" Content="Clear / លុប" Click="BtnClear_Click"
                     Background="#D32F2F" Foreground="White" Margin="4,0,0,0" Height="40"
